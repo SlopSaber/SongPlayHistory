@@ -197,8 +197,7 @@ internal class ScoringCacheManager: IScoringCacheManager
                 null,
                 dataVersion,
                 null,
-                null,
-                false);
+                null);
 
         cancellationToken.ThrowIfCancellationRequested();
         

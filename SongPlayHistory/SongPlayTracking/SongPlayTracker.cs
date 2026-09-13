@@ -32,7 +32,7 @@ internal class SongPlayTracker : IInitializable, IDisposable
 
     // This type is actually binded in PCInit so it will never be null
     [InjectOptional]
-    private readonly StandardLevelScenesTransitionSetupDataSO? _standardTransitionData = null;
+    private readonly StandardLevelScenesTransitionSetupData? _standardTransitionData = null;
 
     // Use this instead of MultiplayerLevelScenesTransitionSetupDataSO to trigger result gathering
     // as soon as the player fail and/or becomes inactive, instead of waiting for return to lobby.
@@ -79,12 +79,12 @@ internal class SongPlayTracker : IInitializable, IDisposable
         }
     }
 
-    private void OnStandardLevelDidFinish(StandardLevelScenesTransitionSetupDataSO? data, LevelCompletionResults? results)
+    private void OnStandardLevelDidFinish(StandardLevelScenesTransitionSetupData? data, LevelCompletionResults? results)
     {
         _logger.Trace("Standard level finished");
         if (data == null)
         {
-            _logger.Warn("StandardLevelScenesTransitionSetupDataSO is null.");
+            _logger.Warn("StandardLevelScenesTransitionSetupData is null.");
             return;
         }
 

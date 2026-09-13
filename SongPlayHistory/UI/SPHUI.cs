@@ -161,7 +161,7 @@ namespace SongPlayHistory.UI
         {
             if (beatmap == null) return;
             _logger.Info("Updating SPH UI");
-            _logger.Debug($"{beatmap.songName} {beatmapKey.beatmapCharacteristic.serializedName} {beatmapKey.difficulty}");
+            _logger.Debug($"{beatmap.songName} {beatmapKey.characteristic.SerializedName()} {beatmapKey.difficulty}");
 
             var records = _recordsManager.GetRecords(beatmapKey);
             SetStats(beatmapKey, records.Count);

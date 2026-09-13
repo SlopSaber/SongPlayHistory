@@ -22,7 +22,7 @@ namespace SongPlayHistory.Model
         }
 
         public LevelMapKey(BeatmapKey beatmap)
-            : this(beatmap.levelId, beatmap.beatmapCharacteristic.serializedName, beatmap.difficulty)
+            : this(beatmap.levelId, beatmap.characteristic.SerializedName(), beatmap.difficulty)
         {
         }
 
