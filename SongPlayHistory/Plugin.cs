@@ -61,7 +61,7 @@ namespace SongPlayHistory
             DebugLog($"BeatLeader: {BLMetadata?.HVersion.ToString() ?? "not installed"}");
             DebugLog($"DiTails: {DiTailsMetadata?.HVersion.ToString() ?? "not installed"}");
 
-            zenjector.UseLogger();
+            zenjector.UseLogger(logger);
             zenjector.Install<SongPlayTrackingInstaller>(Location.MultiPlayer | Location.StandardPlayer);
             zenjector.Install<MenuInstaller>(Location.Menu);
             zenjector.Install<AppInstaller>(Location.App, pluginConfig);
