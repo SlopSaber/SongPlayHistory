@@ -2,6 +2,10 @@
 <!-- This file contains project properties used by the build. -->
 <Project>
 	<PropertyGroup>
+		<BeatSaberDir>D:\BSManager\BSInstances\1.45.1</BeatSaberDir>
+		<GameDirectory>$(BeatSaberDir)</GameDirectory>
+		<CopyPDB>false</CopyPDB>
+		<DisableCopyToGame>false</DisableCopyToGame>
 		<ImportBSMTTargets>True</ImportBSMTTargets>
 		<BSMTProjectType>BSIPA</BSMTProjectType>
 	</PropertyGroup>
