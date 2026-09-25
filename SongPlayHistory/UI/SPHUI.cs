@@ -15,6 +15,8 @@ using SongPlayHistory.SongPlayData;
 using SongPlayHistory.Utils;
 using TMPro;
 using UnityEngine;
+using UnityEngine.EventSystems;
+using UnityEngine.UI;
 using Zenject;
 using UObject = UnityEngine.Object;
 
@@ -40,6 +42,10 @@ namespace SongPlayHistory.UI
         
         private readonly HoverHint? _hoverHint;
 
+        private readonly HoverHintController _hoverHintController;
+
+        private readonly HoverAreaState? _hoverAreaState;
+
         private readonly TMP_Text? _playCount;
         
         private CancellationTokenSource? _cts;
@@ -49,16 +55,17 @@ namespace SongPlayHistory.UI
         {
             _levelDetailViewController = levelDetailViewController;
             _logger = logger;
+            _hoverHintController = hoverHintController;
             
             var levelStatsView = leaderboardViewController._levelStatsView;
-            var levelDetailView = levelDetailViewController._standardLevelDetailView;
-            var levelParamsPanel = levelDetailView._levelParamsPanel;
 
             try
             {
                 _logger.Info("Preparing SPU UI");
-                _hoverHint = PrepareHoverHint((levelStatsView.transform as RectTransform)!, levelParamsPanel, hoverHintController);
+                _hoverHint = PrepareHoverHint((RectTransform)levelStatsView.transform, hoverHintController);
+                _hoverAreaState = _hoverHint.GetComponent<HoverAreaState>();
                 _playCount = PreparePlayCount(levelStatsView);
+                _hoverHint.transform.SetAsLastSibling();
             }
             catch (Exception ex)
             {
@@ -67,19 +74,19 @@ namespace SongPlayHistory.UI
             }
         }
         
-        private HoverHint PrepareHoverHint(RectTransform parent, LevelParamsPanel levelParamsPanel, HoverHintController hoverHintController)
+        private HoverHint PrepareHoverHint(RectTransform parent, HoverHintController hoverHintController)
         {
             _logger.Debug("Preparing hover area for play history");
-            var template = levelParamsPanel.GetComponentsInChildren<RectTransform>().First(x => x.name == "NotesCount");
-            var label = UObject.Instantiate(template, parent);
-            label.name = "SPH HoverArea";
+            var hoverArea = new GameObject("SPH HoverArea", typeof(RectTransform), typeof(Image));
+            var label = (RectTransform)hoverArea.transform;
+            label.SetParent(parent, false);
             label.MatchParent();
-            UObject.Destroy(label.Find("Icon").gameObject);
-            UObject.Destroy(label.Find("ValueText").gameObject);
-            UObject.Destroy(label.GetComponentInChildren<HoverHint>());
-            UObject.Destroy(label.GetComponentInChildren<LocalizedHoverHint>());
+            var image = hoverArea.GetComponent<Image>();
+            image.color = Color.clear;
+            image.raycastTarget = true;
 
-            var hoverHint = label.gameObject.AddComponent<HoverHint>();
+            hoverArea.AddComponent<HoverAreaState>();
+            var hoverHint = hoverArea.AddComponent<HoverHint>();
             hoverHint.SetField("_hoverHintController", hoverHintController);
             hoverHint.text = "";
             return hoverHint;
@@ -166,6 +173,8 @@ namespace SongPlayHistory.UI
             var records = _recordsManager.GetRecords(beatmapKey);
             SetStats(beatmapKey, records.Count);
 
+            _hoverHint!.text = "Loading play history...";
+
             _cts?.Cancel();
             _cts?.Dispose();
             _cts = new CancellationTokenSource();
@@ -173,14 +182,21 @@ namespace SongPlayHistory.UI
             Task.Run(() => GetRecordsText(beatmapKey, beatmap, records, token), token)
                 .ContinueWith(task =>
                 {
+                    if (token.IsCancellationRequested) return;
                     if (task.IsFaulted && task.Exception != null)
                     {
                         _logger.Error($"Failed to update SPH ui: {task.Exception.Message}");
                         _logger.Error(task.Exception);
+                        _hoverHint!.text = "Play history unavailable.";
                     }
                     else
                     {
-                        _hoverHint!.text = task.Result; // update the hover hint ui on the main thread
+                        _hoverHint!.text = task.Result;
+                    }
+
+                    if (_hoverAreaState?.IsHovered == true)
+                    {
+                        _hoverHintController.ShowHint(_hoverHint!);
                     }
                 }, CancellationToken.None, TaskContinuationOptions.NotOnCanceled, UnityMainThreadTaskScheduler.Default);
         }
@@ -189,11 +205,7 @@ namespace SongPlayHistory.UI
         {
             _logger.Debug($"Preparing records text from Thread {Environment.CurrentManagedThreadId}");
             
-            using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            var task = _scoringCacheManager.GetScoringInfo(beatmapKey, beatmap, cts.Token);  // let it run in the background first
-           
             var config = PluginConfig.Instance;
-            var key = new LevelMapKey(beatmapKey);
             records =
                 from record in records
                 where config.ShowFailed || record.LevelEnd == LevelEndType.Cleared
@@ -208,9 +220,11 @@ namespace SongPlayHistory.UI
             if (cancellationToken.IsCancellationRequested) return "";
             if (truncated.Count == 0)
             {
-                cts.Cancel();
-                return "No record";
+                return "No saved play history for this difficulty.";
             }
+
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            var task = _scoringCacheManager.GetScoringInfo(beatmapKey, beatmap, cts.Token);
 
             // then we get the result
             var cache = await task;
@@ -303,5 +317,14 @@ namespace SongPlayHistory.UI
                 : sphPlayCount;
             _playCount!.text = playCount.ToString();
         }
+    }
+
+    internal sealed class HoverAreaState : MonoBehaviour, IPointerEnterHandler, IPointerExitHandler
+    {
+        public bool IsHovered { get; private set; }
+
+        public void OnPointerEnter(PointerEventData eventData) => IsHovered = true;
+
+        public void OnPointerExit(PointerEventData eventData) => IsHovered = false;
     }
 }
