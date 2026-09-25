@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Text;
 using System.Threading;
@@ -16,7 +17,6 @@ using SongPlayHistory.Utils;
 using TMPro;
 using UnityEngine;
 using UnityEngine.EventSystems;
-using UnityEngine.UI;
 using Zenject;
 using UObject = UnityEngine.Object;
 
@@ -47,6 +47,8 @@ namespace SongPlayHistory.UI
         private readonly HoverAreaState? _hoverAreaState;
 
         private readonly TMP_Text? _playCount;
+
+        private readonly TMP_Text? _highScore;
         
         private CancellationTokenSource? _cts;
 
@@ -58,13 +60,17 @@ namespace SongPlayHistory.UI
             _hoverHintController = hoverHintController;
             
             var levelStatsView = leaderboardViewController._levelStatsView;
+            var levelParamsPanel = levelDetailViewController._standardLevelDetailView._levelParamsPanel;
 
             try
             {
                 _logger.Info("Preparing SPU UI");
-                _hoverHint = PrepareHoverHint((RectTransform)levelStatsView.transform, hoverHintController);
+                _hoverHint = PrepareHoverHint((RectTransform)levelStatsView.transform, levelParamsPanel);
+                _hoverHintController = _hoverHint.GetField<HoverHintController, HoverHint>("_hoverHintController") ?? hoverHintController;
+                _hoverHint.SetField("_hoverHintController", _hoverHintController);
                 _hoverAreaState = _hoverHint.GetComponent<HoverAreaState>();
-                _playCount = PreparePlayCount(levelStatsView);
+                _playCount = PreparePlayCount(levelStatsView, out var highScore);
+                _highScore = highScore;
                 _hoverHint.transform.SetAsLastSibling();
             }
             catch (Exception ex)
@@ -74,30 +80,32 @@ namespace SongPlayHistory.UI
             }
         }
         
-        private HoverHint PrepareHoverHint(RectTransform parent, HoverHintController hoverHintController)
+        private HoverHint PrepareHoverHint(RectTransform parent, LevelParamsPanel levelParamsPanel)
         {
             _logger.Debug("Preparing hover area for play history");
-            var hoverArea = new GameObject("SPH HoverArea", typeof(RectTransform), typeof(Image));
-            var label = (RectTransform)hoverArea.transform;
-            label.SetParent(parent, false);
+            var template = levelParamsPanel.GetComponentsInChildren<RectTransform>().First(x => x.name == "NotesCount");
+            var label = UObject.Instantiate(template, parent);
+            label.name = "SPH HoverArea";
             label.MatchParent();
-            var image = hoverArea.GetComponent<Image>();
-            image.color = Color.clear;
-            image.raycastTarget = true;
+            UObject.Destroy(label.Find("Icon").gameObject);
+            UObject.Destroy(label.Find("ValueText").gameObject);
+            var localizedHint = label.GetComponent<LocalizedHoverHint>();
+            localizedHint.enabled = false;
+            UObject.Destroy(localizedHint);
 
-            hoverArea.AddComponent<HoverAreaState>();
-            var hoverHint = hoverArea.AddComponent<HoverHint>();
-            hoverHint.SetField("_hoverHintController", hoverHintController);
+            label.gameObject.AddComponent<HoverAreaState>();
+            var hoverHint = label.GetComponent<HoverHint>();
             hoverHint.text = "";
             return hoverHint;
         }
 
-        private TMP_Text PreparePlayCount(LevelStatsView levelStatsView)
+        private TMP_Text PreparePlayCount(LevelStatsView levelStatsView, out TMP_Text highScoreText)
         {
             _logger.Debug("Preparing extra level stats ui for play count");
             var maxCombo = levelStatsView.GetComponentsInChildren<RectTransform>().First(x => x.name == "MaxCombo");
             var highscore = levelStatsView.GetComponentsInChildren<RectTransform>().First(x => x.name == "Highscore");
             var maxRank = levelStatsView.GetComponentsInChildren<RectTransform>().First(x => x.name == "MaxRank");
+            highScoreText = highscore.GetComponentsInChildren<TextMeshProUGUI>().First(x => x.name == "Value");
 
             var playCount = UObject.Instantiate(maxCombo, levelStatsView.transform);
             playCount.name = "SPH PlayCount";
@@ -125,7 +133,7 @@ namespace SongPlayHistory.UI
         
         public void Initialize()
         {
-            if (_hoverHint == null || _playCount == null) return;
+            if (_hoverHint == null || _playCount == null || _highScore == null) return;
             
             _levelDetailViewController.didChangeDifficultyBeatmapEvent -= OnDifficultyChanged;
             _levelDetailViewController.didChangeDifficultyBeatmapEvent += OnDifficultyChanged;
@@ -171,15 +179,23 @@ namespace SongPlayHistory.UI
             _logger.Debug($"{beatmap.songName} {beatmapKey.characteristic.SerializedName()} {beatmapKey.difficulty}");
 
             var records = _recordsManager.GetRecords(beatmapKey);
+            var stats = _playerDataModel.playerData.TryGetPlayerLevelStatsData(beatmapKey);
+            int? highScore = stats?.validScore == true ? stats.highScore : null;
             SetStats(beatmapKey, records.Count);
 
-            _hoverHint!.text = "Loading play history...";
+            _hoverHint!.text = GetRecordsText(records, null);
+            if (_hoverAreaState?.IsHovered == true)
+            {
+                _hoverHintController.ShowHint(_hoverHint);
+            }
 
             _cts?.Cancel();
             _cts?.Dispose();
             _cts = new CancellationTokenSource();
+            if (records.Count == 0 && !highScore.HasValue) return;
+
             var token = _cts.Token;
-            Task.Run(() => GetRecordsText(beatmapKey, beatmap, records, token), token)
+            _scoringCacheManager.GetScoringInfo(beatmapKey, beatmap, token)
                 .ContinueWith(task =>
                 {
                     if (token.IsCancellationRequested) return;
@@ -187,11 +203,16 @@ namespace SongPlayHistory.UI
                     {
                         _logger.Error($"Failed to update SPH ui: {task.Exception.Message}");
                         _logger.Error(task.Exception);
-                        _hoverHint!.text = "Play history unavailable.";
+                        return;
                     }
-                    else
+
+                    var cache = task.Result;
+                    _logger.Debug($"Scoring data ready for {beatmapKey.SerializedName()}: {cache}");
+                    _hoverHint!.text = GetRecordsText(records, cache);
+                    if (highScore.HasValue && cache.MaxMultipliedScore > 0)
                     {
-                        _hoverHint!.text = task.Result;
+                        var percentage = highScore.Value * 100d / cache.MaxMultipliedScore;
+                        _highScore!.text = percentage.ToString("0.00", CultureInfo.InvariantCulture) + "%";
                     }
 
                     if (_hoverAreaState?.IsHovered == true)
@@ -201,10 +222,8 @@ namespace SongPlayHistory.UI
                 }, CancellationToken.None, TaskContinuationOptions.NotOnCanceled, UnityMainThreadTaskScheduler.Default);
         }
         
-        private async Task<string> GetRecordsText(BeatmapKey beatmapKey, BeatmapLevel beatmap, IEnumerable<ISongPlayRecord> records, CancellationToken cancellationToken)
+        private string GetRecordsText(IEnumerable<ISongPlayRecord> records, LevelScoringCache? cache)
         {
-            _logger.Debug($"Preparing records text from Thread {Environment.CurrentManagedThreadId}");
-            
             var config = PluginConfig.Instance;
             records =
                 from record in records
@@ -217,22 +236,14 @@ namespace SongPlayHistory.UI
 
             var truncated = records.Take(10).ToList();
             
-            if (cancellationToken.IsCancellationRequested) return "";
             if (truncated.Count == 0)
             {
                 return "No saved play history for this difficulty.";
             }
 
-            using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            var task = _scoringCacheManager.GetScoringInfo(beatmapKey, beatmap, cts.Token);
-
-            // then we get the result
-            var cache = await task;
-            _logger.Trace($"Got scoring data: {cache}");
-            
-            var fullMaxScore = cache.MaxMultipliedScore;
-            var notesCount = cache.NotesCount;
-            var isV2Score = cache.IsV2Score;
+            var fullMaxScore = cache?.MaxMultipliedScore ?? -1;
+            var notesCount = cache?.NotesCount ?? -1;
+            var isV2Score = cache?.IsV2Score == true;
             
             var builder = new StringBuilder(200);
             foreach (var r in truncated)
@@ -296,8 +307,10 @@ namespace SongPlayHistory.UI
                         builder.Append($"<size=2.5><color=#1a252bff> cleared</color></size>");
                     else if (r.LastNote == 0) // old record (success, fail, or practice)
                         builder.Append($"<size=2.5><color=#584153ff> unknown</color></size>");
-                    else
+                    else if (notesCount >= 0)
                         builder.Append($"<size=2.5><color=#ff5722ff> +{notesRemaining} notes</color></size>");
+                    else
+                        builder.Append("<size=2.5><color=#ff5722ff> failed</color></size>");
                 }
                 #endregion
 
@@ -305,7 +318,6 @@ namespace SongPlayHistory.UI
                 builder.AppendLine();
             }
  
-            if (cancellationToken.IsCancellationRequested) return "";
             return builder.ToString();
         }
 
@@ -323,7 +335,11 @@ namespace SongPlayHistory.UI
     {
         public bool IsHovered { get; private set; }
 
-        public void OnPointerEnter(PointerEventData eventData) => IsHovered = true;
+        public void OnPointerEnter(PointerEventData eventData)
+        {
+            IsHovered = true;
+            Plugin.Log.Debug("Play history hover entered");
+        }
 
         public void OnPointerExit(PointerEventData eventData) => IsHovered = false;
     }
