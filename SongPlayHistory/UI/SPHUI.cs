@@ -46,6 +46,8 @@ namespace SongPlayHistory.UI
 
         private readonly HoverAreaState? _hoverAreaState;
 
+        private readonly StatsHoverOrder? _hoverOrder;
+
         private readonly TMP_Text? _playCount;
 
         private readonly TMP_Text? _highScore;
@@ -72,6 +74,8 @@ namespace SongPlayHistory.UI
                 _playCount = PreparePlayCount(levelStatsView, out var highScore);
                 _highScore = highScore;
                 _hoverHint.transform.SetAsLastSibling();
+                _hoverOrder = leaderboardViewController.gameObject.AddComponent<StatsHoverOrder>();
+                _hoverOrder.Initialize((RectTransform)levelStatsView.transform);
             }
             catch (Exception ex)
             {
@@ -152,6 +156,7 @@ namespace SongPlayHistory.UI
             _cts?.Cancel();
             _cts?.Dispose();
             _cts = null;
+            if (_hoverOrder != null) UObject.Destroy(_hoverOrder);
         }
         
         private void OnDifficultyChanged(StandardLevelDetailViewController controller)
@@ -341,6 +346,13 @@ namespace SongPlayHistory.UI
             Plugin.Log.Debug("Play history hover entered");
         }
 
-        public void OnPointerExit(PointerEventData eventData) => IsHovered = false;
+        public void OnPointerExit(PointerEventData eventData)
+        {
+            IsHovered = false;
+            var target = eventData.pointerCurrentRaycast.gameObject;
+            Plugin.Log.Debug($"Play history hover exited to {(target != null ? target.name : "none")}");
+        }
+
+        private void OnDisable() => IsHovered = false;
     }
 }
