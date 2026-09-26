@@ -1,9 +1,10 @@
 ﻿using BeatSaberMarkupLanguage.Settings;
 using Zenject;
+using System;
 
 namespace SongPlayHistory.UI;
 
-internal class MenuSettingsManager: IInitializable
+internal class MenuSettingsManager: IInitializable, IDisposable
 {
     private readonly SettingsController _settingsController;
     private readonly BSMLSettings _bsmlSettings;
@@ -17,5 +18,10 @@ internal class MenuSettingsManager: IInitializable
     public void Initialize()
     {
         _bsmlSettings.AddSettingsMenu("Song Play History", "SongPlayHistory.UI.Settings.bsml", _settingsController);
+    }
+
+    public void Dispose()
+    {
+        _bsmlSettings.RemoveSettingsMenu(_settingsController);
     }
 }

@@ -77,7 +77,7 @@ namespace SongPlayHistory.Utils
         
         internal static StringBuilder TMPSpace(this StringBuilder s, int len)
         {
-            var space = string.Concat(Enumerable.Repeat("_", len));
+            var space = new string('_', len);
             return s.Append($"<size=1><color=#00000000>{space}</color></size>");
         }
     }

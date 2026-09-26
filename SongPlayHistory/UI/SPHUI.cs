@@ -251,10 +251,11 @@ namespace SongPlayHistory.UI
             var isV2Score = cache?.IsV2Score == true;
             
             var builder = new StringBuilder(200);
-            foreach (var r in truncated)
+            for (var index = 0; index < truncated.Count; index++)
             {
+                var r = truncated[index];
                 _logger.Trace($"Record: {r}");
-                builder.TMPSpace(truncated.Count - truncated.IndexOf(r) - 1);
+                builder.TMPSpace(truncated.Count - index - 1);
                 builder.Append($"<size=2.5><color=#1a252bff> {r.LocalTime:d}</color></size>");
                 builder.Append($"<size=3.5><color=#0f4c75ff> {r.ModifiedScore}</color></size>");
                 
@@ -319,7 +320,7 @@ namespace SongPlayHistory.UI
                 }
                 #endregion
 
-                builder.TMPSpace(truncated.IndexOf(r));
+                builder.TMPSpace(index);
                 builder.AppendLine();
             }
  

@@ -43,16 +43,7 @@ namespace SongPlayHistory
                 }
             }
 
-            Image? voteIcon = null;
-            foreach (var image in __instance.GetComponentsInChildren<Image>())
-            {
-                // For performance reason, avoid using Linq.
-                if (image.name == "Vote")
-                {
-                    voteIcon = image;
-                    break;
-                }
-            }
+            Image? voteIcon = __instance.transform.Find("Vote")?.GetComponent<Image>();
             if (voteIcon == null)
             {
                 voteIcon = Instantiate(____favoritesBadgeImage, __instance.transform);

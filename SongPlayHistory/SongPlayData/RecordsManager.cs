@@ -3,6 +3,8 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 using IPA.Utilities;
 using Newtonsoft.Json;
 using SiraUtil.Logging;
@@ -19,6 +21,8 @@ namespace SongPlayHistory.SongPlayData
         private readonly string DataFile = Path.Combine(UnityGame.UserDataPath, "SongPlayData.json");
 
         private ConcurrentDictionary<string, IList<Record>> Records { get; set; } = new();
+        private readonly object _saveLock = new();
+        private Task _pendingSave = Task.CompletedTask;
 
         [Inject]
         private readonly SiraLog _logger = null!;
@@ -50,7 +54,7 @@ namespace SongPlayHistory.SongPlayData
                 Records = records;
             }
             
-            SaveRecordsToFile();
+            QueueSaveRecordsToFile();
             _logger.Info($"Loaded {SumRecords(Records)} records from {Records.Count} levels.");
             
             // TODO remove bad records?
@@ -85,7 +89,7 @@ namespace SongPlayHistory.SongPlayData
 
         public void Dispose()
         {
-            SaveRecordsToFile();
+            _pendingSave.GetAwaiter().GetResult();
             BackupRecords();
         }
 
@@ -188,23 +192,32 @@ namespace SongPlayHistory.SongPlayData
 
             var key = new LevelMapKey(beatmapKey).ToOldKey();
 
-            Records.GetOrAdd(key, new List<Record>()).Add(record);
+            lock (_saveLock)
+            {
+                Records.GetOrAdd(key, new List<Record>()).Add(record);
+                QueueSaveRecordsToFile();
+            }
 
-            // Save to a file. We do this synchronously because the overhead is small. (400 ms / 15 MB, 60 ms / 1 MB)
-            SaveRecordsToFile();
-
-            _logger.Info($"Saved a new record ({result.modifiedScore}).");
+            _logger.Info($"Queued a new record ({result.modifiedScore}) for saving.");
         }
 
-        private void SaveRecordsToFile()
+        private void QueueSaveRecordsToFile()
+        {
+            lock (_saveLock)
+            {
+                if (Records.Count == 0) return;
+                var snapshot = Records.ToDictionary(pair => pair.Key, pair => pair.Value.ToArray());
+                _pendingSave = _pendingSave.ContinueWith(_ => SaveRecordsSnapshot(snapshot),
+                    CancellationToken.None, TaskContinuationOptions.None, TaskScheduler.Default);
+            }
+        }
+
+        private void SaveRecordsSnapshot(Dictionary<string, Record[]> snapshot)
         {
             try
             {
-                if (Records.Count > 0)
-                {
-                    var serialized = JsonConvert.SerializeObject(Records, Formatting.Indented);
-                    File.WriteAllText(DataFile, serialized);
-                }
+                var serialized = JsonConvert.SerializeObject(snapshot, Formatting.Indented);
+                File.WriteAllText(DataFile, serialized);
             }
             catch (Exception ex) // IOException, JsonException
             {
