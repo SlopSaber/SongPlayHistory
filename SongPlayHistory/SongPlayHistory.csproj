@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
@@ -10,7 +10,6 @@
     <EnableNETAnalyzers>true</EnableNETAnalyzers>
     <DebugType>portable</DebugType>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
-    <NoWarn>$(NoWarn);CS0436</NoWarn>
     <EnableFrameworkPathOverride>true</EnableFrameworkPathOverride>
     <FrameworkPathOverride>$(BeatSaberDir)\Beat Saber_Data\Managed</FrameworkPathOverride>
     <MarkPackageReferencesAsExternallyResolved>false</MarkPackageReferencesAsExternallyResolved>
