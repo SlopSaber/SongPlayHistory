@@ -73,12 +73,14 @@ namespace SongPlayHistory
         public void OnStart()
         {
             _harmony.PatchAll(Assembly.GetExecutingAssembly());
+            SetDataFromLevelAsync.PrepareIcons();
         }
 
         [OnExit]
         public void OnExit()
         {
             _harmony.UnpatchSelf();
+            SetDataFromLevelAsync.OnUnpatch();
         }
 
         [Conditional("DEBUG")]

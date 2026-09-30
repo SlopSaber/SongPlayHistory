@@ -16,18 +16,27 @@ using Zenject;
 
 namespace SongPlayHistory.SongPlayData
 {
-    internal class RecordsManager: IInitializable, IDisposable, IRecordManager
+    internal class RecordsManager: IInitializable, IDisposable, IAsyncRecordManager
     {
         private readonly string DataFile = Path.Combine(UnityGame.UserDataPath, "SongPlayData.json");
 
         private ConcurrentDictionary<string, IList<Record>> Records { get; set; } = new();
         private readonly object _saveLock = new();
+        private readonly object _recordsLock = new();
         private Task _pendingSave = Task.CompletedTask;
 
         [Inject]
         private readonly SiraLog _logger = null!;
 
         public void Initialize()
+        {
+            lock (_saveLock)
+            {
+                _pendingSave = Task.Run(LoadInitialRecords);
+            }
+        }
+
+        private void LoadInitialRecords()
         {
             // We don't anymore support migrating old records from a config file.
 
@@ -54,7 +63,7 @@ namespace SongPlayHistory.SongPlayData
                 Records = records;
             }
             
-            QueueSaveRecordsToFile();
+            SaveRecordsToFile();
             _logger.Info($"Loaded {SumRecords(Records)} records from {Records.Count} levels.");
             
             // TODO remove bad records?
@@ -89,18 +98,59 @@ namespace SongPlayHistory.SongPlayData
 
         public void Dispose()
         {
-            _pendingSave.GetAwaiter().GetResult();
-            BackupRecords();
+            Task finalSave;
+            lock (_saveLock)
+            {
+                finalSave = _pendingSave = _pendingSave.ContinueWith(task =>
+                {
+                    task.GetAwaiter().GetResult();
+                    BackupRecords();
+                },
+                    CancellationToken.None, TaskContinuationOptions.None, TaskScheduler.Default);
+            }
+
+            // App shutdown must drain queued persistence before the process exits.
+            finalSave.GetAwaiter().GetResult();
         }
 
         public IList<ISongPlayRecord> GetRecords(BeatmapKey beatmap)
         {
             var key = new LevelMapKey(beatmap);
-            _logger.Debug($"Getting records for {key}");
-            if (Records.TryGetValue(key.ToOldKey(), out var records))
+            Task pending;
+            lock (_saveLock)
             {
-                _logger.Debug($"Total number of records: {records.Count}");
-                return records.Copy();
+                pending = _pendingSave;
+            }
+
+            // Preserve the synchronous API for consumers; UI uses GetRecordsAsync.
+            pending.GetAwaiter().GetResult();
+            return GetRecordsSnapshot(key);
+        }
+
+        public async Task<IList<ISongPlayRecord>> GetRecordsAsync(BeatmapKey beatmap, CancellationToken cancellationToken)
+        {
+            var key = new LevelMapKey(beatmap);
+            Task pending;
+            lock (_saveLock)
+            {
+                pending = _pendingSave;
+            }
+
+            await pending.ConfigureAwait(false);
+            cancellationToken.ThrowIfCancellationRequested();
+            return await Task.Run(() => GetRecordsSnapshot(key), cancellationToken).ConfigureAwait(false);
+        }
+
+        private IList<ISongPlayRecord> GetRecordsSnapshot(LevelMapKey key)
+        {
+            _logger.Debug($"Getting records for {key}");
+            lock (_recordsLock)
+            {
+                if (Records.TryGetValue(key.ToOldKey(), out var records))
+                {
+                    _logger.Debug($"Total number of records: {records.Count}");
+                    return records.Copy();
+                }
             }
 
             _logger.Debug("No records found.");
@@ -194,22 +244,31 @@ namespace SongPlayHistory.SongPlayData
 
             lock (_saveLock)
             {
-                Records.GetOrAdd(key, new List<Record>()).Add(record);
-                QueueSaveRecordsToFile();
+                _pendingSave = _pendingSave.ContinueWith(task =>
+                {
+                    task.GetAwaiter().GetResult();
+                    lock (_recordsLock)
+                    {
+                        Records.GetOrAdd(key, new List<Record>()).Add(record);
+                    }
+
+                    SaveRecordsToFile();
+                }, CancellationToken.None, TaskContinuationOptions.None, TaskScheduler.Default);
             }
 
             _logger.Info($"Queued a new record ({result.modifiedScore}) for saving.");
         }
 
-        private void QueueSaveRecordsToFile()
+        private void SaveRecordsToFile()
         {
-            lock (_saveLock)
+            Dictionary<string, Record[]> snapshot;
+            lock (_recordsLock)
             {
                 if (Records.Count == 0) return;
-                var snapshot = Records.ToDictionary(pair => pair.Key, pair => pair.Value.ToArray());
-                _pendingSave = _pendingSave.ContinueWith(_ => SaveRecordsSnapshot(snapshot),
-                    CancellationToken.None, TaskContinuationOptions.None, TaskScheduler.Default);
+                snapshot = Records.ToDictionary(pair => pair.Key, pair => pair.Value.ToArray());
             }
+
+            SaveRecordsSnapshot(snapshot);
         }
 
         private void SaveRecordsSnapshot(Dictionary<string, Record[]> snapshot)

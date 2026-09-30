@@ -1,5 +1,8 @@
 ﻿using System;
 using HMUI;
+using System.Threading;
+using System.Threading.Tasks;
+using IPA.Utilities.Async;
 using SiraUtil.Logging;
 using SongPlayHistory.Model;
 using Zenject;
@@ -32,6 +35,19 @@ namespace SongPlayHistory.VoteTracker
             Instance = this;
             _resultsViewController.continueButtonPressedEvent -= OnPlayResultDismiss;
             _resultsViewController.continueButtonPressedEvent += OnPlayResultDismiss;
+            if (_voteTracker is InternalVoteTracker tracker)
+            {
+                tracker.Ready.ContinueWith(task =>
+                {
+                    if (task.IsFaulted)
+                    {
+                        _logger.Error($"Failed to load votes: {task.Exception}");
+                        return;
+                    }
+
+                    if (Instance == this) _tableView.RefreshCellsContent();
+                }, CancellationToken.None, TaskContinuationOptions.NotOnCanceled, UnityMainThreadTaskScheduler.Default);
+            }
         }
 
         public void Dispose()
@@ -55,7 +71,15 @@ namespace SongPlayHistory.VoteTracker
         
         internal bool TryGetVote(BeatmapLevel level, out VoteType voteType)
         {
+            if (_voteTracker is InternalVoteTracker tracker && !tracker.Ready.IsCompleted)
+            {
+                voteType = VoteType.Downvote;
+                return false;
+            }
+
             return _voteTracker.TryGetVote(level, out voteType);
         }
+
+        internal void RefreshVotes() => _tableView.RefreshCellsContent();
     }
 }

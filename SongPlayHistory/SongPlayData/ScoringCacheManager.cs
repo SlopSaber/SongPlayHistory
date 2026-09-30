@@ -207,18 +207,19 @@ internal class ScoringCacheManager: IScoringCacheManager
             throw new Exception("Failed to get BeatmapData.");
         }
 
-        var notesCount = beatmapData.cuttableNotesCount;
-        var fullMaxScore = ScoreModel.ComputeMaxMultipliedScoreForBeatmap(beatmapData);
-        // we can use the original v2 scoring method to calculate the adjusted max score if there is no slider or burst
-        var isV2Score = !beatmapData.GetBeatmapDataItems<SliderData>(0).Any();
-        cancellationToken.ThrowIfCancellationRequested();
-
-        var newCache = new LevelScoringCache
+        var newCache = await Task.Run(() =>
         {
-            MaxMultipliedScore = fullMaxScore,
-            NotesCount = notesCount,
-            IsV2Score = isV2Score
-        };
+            var notesCount = beatmapData.cuttableNotesCount;
+            var fullMaxScore = ScoreModel.ComputeMaxMultipliedScoreForBeatmap(beatmapData);
+            var isV2Score = !beatmapData.GetBeatmapDataItems<SliderData>(0).Any();
+            cancellationToken.ThrowIfCancellationRequested();
+            return new LevelScoringCache
+            {
+                MaxMultipliedScore = fullMaxScore,
+                NotesCount = notesCount,
+                IsV2Score = isV2Score
+            };
+        }, cancellationToken);
 
         // write cache
         _cache[beatmapKey] = newCache;

@@ -8,7 +8,6 @@ using System.Threading.Tasks;
 using HMUI;
 using IPA.Utilities;
 using BGLib.Polyglot;
-using IPA.Utilities.Async;
 using SiraUtil.Logging;
 using SongPlayHistory.Configuration;
 using SongPlayHistory.Model;
@@ -25,7 +24,7 @@ namespace SongPlayHistory.UI
     internal class SPHUI: IInitializable, IDisposable
     {
         [Inject]
-        private readonly IRecordManager _recordsManager = null!;
+        private readonly IAsyncRecordManager _recordsManager = null!;
 
         [Inject]
         private readonly PlayerDataModel _playerDataModel = null!;
@@ -177,65 +176,80 @@ namespace SongPlayHistory.UI
             UpdateUI(_levelDetailViewController.beatmapKey, _levelDetailViewController.beatmapLevel);
         }
 
-        private void UpdateUI(BeatmapKey beatmapKey, BeatmapLevel? beatmap)
+        private async void UpdateUI(BeatmapKey beatmapKey, BeatmapLevel? beatmap)
         {
+            _cts?.Cancel();
+            _cts?.Dispose();
+            _cts = null;
             if (beatmap == null) return;
             _logger.Info("Updating SPH UI");
             _logger.Debug($"{beatmap.songName} {beatmapKey.characteristic.SerializedName()} {beatmapKey.difficulty}");
 
-            var records = _recordsManager.GetRecords(beatmapKey);
             var stats = _playerDataModel.playerData.TryGetPlayerLevelStatsData(beatmapKey);
             int? highScore = stats?.validScore == true ? stats.highScore : null;
-            SetStats(beatmapKey, records.Count);
-
-            _hoverHint!.text = GetRecordsText(records, null);
-            if (_hoverAreaState?.IsHovered == true)
-            {
-                _hoverHintController.ShowHint(_hoverHint);
-            }
-
-            _cts?.Cancel();
-            _cts?.Dispose();
             _cts = new CancellationTokenSource();
-            if (records.Count == 0 && !highScore.HasValue) return;
-
             var token = _cts.Token;
-            _scoringCacheManager.GetScoringInfo(beatmapKey, beatmap, token)
-                .ContinueWith(task =>
+            _hoverHint!.text = "Loading play history...";
+            try
+            {
+                var records = await _recordsManager.GetRecordsAsync(beatmapKey, token);
+                token.ThrowIfCancellationRequested();
+                var text = await BuildRecordsTextAsync(records, null, token);
+                await UnityGame.SwitchToMainThreadAsync();
+                token.ThrowIfCancellationRequested();
+                SetStats(beatmapKey, records.Count);
+                _hoverHint!.text = text;
+                if (_hoverAreaState?.IsHovered == true)
                 {
-                    if (token.IsCancellationRequested) return;
-                    if (task.IsFaulted && task.Exception != null)
-                    {
-                        _logger.Error($"Failed to update SPH ui: {task.Exception.Message}");
-                        _logger.Error(task.Exception);
-                        return;
-                    }
+                    _hoverHintController.ShowHint(_hoverHint);
+                }
 
-                    var cache = task.Result;
-                    _logger.Debug($"Scoring data ready for {beatmapKey.SerializedName()}: {cache}");
-                    _hoverHint!.text = GetRecordsText(records, cache);
-                    if (highScore.HasValue && cache.MaxMultipliedScore > 0)
-                    {
-                        var percentage = highScore.Value * 100d / cache.MaxMultipliedScore;
-                        _highScore!.text = percentage.ToString("0.00", CultureInfo.InvariantCulture) + "%";
-                    }
+                if (records.Count == 0 && !highScore.HasValue) return;
+                var cache = await _scoringCacheManager.GetScoringInfo(beatmapKey, beatmap, token);
+                token.ThrowIfCancellationRequested();
+                text = await BuildRecordsTextAsync(records, cache, token);
+                await UnityGame.SwitchToMainThreadAsync();
+                token.ThrowIfCancellationRequested();
+                _logger.Debug($"Scoring data ready for {beatmapKey.SerializedName()}: {cache}");
+                _hoverHint!.text = text;
+                if (highScore.HasValue && cache.MaxMultipliedScore > 0)
+                {
+                    var percentage = highScore.Value * 100d / cache.MaxMultipliedScore;
+                    _highScore!.text = percentage.ToString("0.00", CultureInfo.InvariantCulture) + "%";
+                }
 
-                    if (_hoverAreaState?.IsHovered == true)
-                    {
-                        _hoverHintController.ShowHint(_hoverHint!);
-                    }
-                }, CancellationToken.None, TaskContinuationOptions.NotOnCanceled, UnityMainThreadTaskScheduler.Default);
+                if (_hoverAreaState?.IsHovered == true)
+                {
+                    _hoverHintController.ShowHint(_hoverHint!);
+                }
+            }
+            catch (OperationCanceledException) when (token.IsCancellationRequested)
+            {
+            }
+            catch (Exception ex)
+            {
+                _logger.Error($"Failed to update SPH ui: {ex.Message}");
+                _logger.Error(ex);
+            }
         }
-        
-        private string GetRecordsText(IEnumerable<ISongPlayRecord> records, LevelScoringCache? cache)
+
+        private Task<string> BuildRecordsTextAsync(IEnumerable<ISongPlayRecord> records, LevelScoringCache? cache, CancellationToken token)
         {
             var config = PluginConfig.Instance;
+            var showFailed = config.ShowFailed;
+            var sortByDate = config.SortByDate;
+            var averageAccuracy = config.AverageAccuracy;
+            return Task.Run(() => GetRecordsText(records, cache, showFailed, sortByDate, averageAccuracy), token);
+        }
+        
+        private string GetRecordsText(IEnumerable<ISongPlayRecord> records, LevelScoringCache? cache, bool showFailed, bool sortByDate, bool averageAccuracy)
+        {
             records =
                 from record in records
-                where config.ShowFailed || record.LevelEnd == LevelEndType.Cleared
+                where showFailed || record.LevelEnd == LevelEndType.Cleared
                 select record;
             
-            records = config.SortByDate 
+            records = sortByDate
                 ? records.OrderByDescending(record => record.LocalTime) 
                 : records.OrderByDescending(record => record.ModifiedScore);
 
@@ -263,7 +277,7 @@ namespace SongPlayHistory.UI
 
                 #region acc
                 var denominator = -1;
-                if (levelFinished || !config.AverageAccuracy)
+                if (levelFinished || !averageAccuracy)
                 {
                     denominator = fullMaxScore;
                 }
@@ -306,7 +320,7 @@ namespace SongPlayHistory.UI
                 #endregion
                 
                 #region level end state
-                if (config.ShowFailed)
+                if (showFailed)
                 {
                     var notesRemaining = notesCount - r.LastNote;
                     if (r.LastNote == -1)

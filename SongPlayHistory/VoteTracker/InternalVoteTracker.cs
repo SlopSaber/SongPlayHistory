@@ -1,7 +1,9 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Collections.Concurrent;
 using System.IO;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 using IPA.Utilities;
 using Newtonsoft.Json;
@@ -16,9 +18,11 @@ namespace SongPlayHistory.VoteTracker
 
         private static readonly string VoteFile = Path.Combine(UnityGame.UserDataPath, "votedSongs.json");
         
-        private static Dictionary<string, UserVote>? Votes { get; set; } = new Dictionary<string, UserVote>();
+        private static ConcurrentDictionary<string, UserVote>? _votes = new();
 
         private static readonly object _voteWriteLock = new();
+        private Task _pendingWork = Task.CompletedTask;
+        internal Task Ready { get; private set; } = Task.CompletedTask;
 
         [Inject]
         private readonly SiraLog _logger = null!;
@@ -28,6 +32,15 @@ namespace SongPlayHistory.VoteTracker
         // private DateTime _voteLastWritten;
 
         public void Initialize()
+        {
+            lock (_voteWriteLock)
+            {
+                Volatile.Write(ref _votes, new ConcurrentDictionary<string, UserVote>());
+                _pendingWork = Ready = Task.Run(LoadVotes);
+            }
+        }
+
+        private void LoadVotes()
         {
             _logger.Info("Loading votes.");
             _readonly = true;
@@ -42,7 +55,8 @@ namespace SongPlayHistory.VoteTracker
             try
             {
                 var text = File.ReadAllText(VoteFile, Encoding.UTF8);
-                Votes = JsonConvert.DeserializeObject<Dictionary<string, UserVote>?>(text) ?? new Dictionary<string, UserVote>();
+                var votes = JsonConvert.DeserializeObject<Dictionary<string, UserVote>?>(text) ?? new Dictionary<string, UserVote>();
+                Volatile.Write(ref _votes, new ConcurrentDictionary<string, UserVote>(votes));
                 _logger.Info("votedSongs.json Loaded");
             }
             catch (Exception ex) // IOException, JsonException
@@ -76,12 +90,10 @@ namespace SongPlayHistory.VoteTracker
 
             try
             {
-                lock (_voteWriteLock)
+                var votes = Volatile.Read(ref _votes);
+                if (votes != null && !votes.IsEmpty)
                 {
-                    if (Votes != null && Votes.Count > 0)
-                    {
-                        File.WriteAllText(VoteFile, JsonConvert.SerializeObject(Votes), Encoding.UTF8);
-                    }
+                    File.WriteAllText(VoteFile, JsonConvert.SerializeObject(votes), Encoding.UTF8);
                 }
             }
             catch (Exception e)
@@ -93,11 +105,18 @@ namespace SongPlayHistory.VoteTracker
 
         public void Dispose()
         {
+            Task finalSave;
             lock (_voteWriteLock)
             {
-                SaveVotes();
-                Votes = null;
+                finalSave = _pendingWork = _pendingWork.ContinueWith(_ =>
+                {
+                    SaveVotes();
+                    Volatile.Write(ref _votes, null);
+                }, CancellationToken.None, TaskContinuationOptions.None, TaskScheduler.Default);
             }
+
+            // Flush at app shutdown so a queued vote cannot be lost at process exit.
+            finalSave.GetAwaiter().GetResult();
         }
 
         public bool TryGetVote(BeatmapLevel level, out VoteType voteType)
@@ -105,8 +124,9 @@ namespace SongPlayHistory.VoteTracker
             voteType = VoteType.Downvote;
             try
             {
+                Ready.GetAwaiter().GetResult();
                 var hash = Utils.Utils.GetLowerCaseCustomLevelHash(level);
-                if (hash != null && Votes?.TryGetValue(hash, out var vote) == true)
+                if (hash != null && Volatile.Read(ref _votes)?.TryGetValue(hash, out var vote) == true)
                 {
                     voteType = vote.VoteType;
                     return true;
@@ -123,26 +143,29 @@ namespace SongPlayHistory.VoteTracker
 
         public void Vote(BeatmapLevel level, VoteType voteType)
         {
-            Task.Run(() =>
+            var hash = Utils.Utils.GetLowerCaseCustomLevelHash(level);
+            var levelId = level.levelID;
+            if (hash == null) return;
+            lock (_voteWriteLock)
             {
-                lock (_voteWriteLock)
+                _pendingWork = _pendingWork.ContinueWith(_ =>
                 {
-                    var hash = Utils.Utils.GetLowerCaseCustomLevelHash(level);
-                    if (hash != null && Votes != null)
+                    var votes = Volatile.Read(ref _votes);
+                    if (votes != null)
                     {
-                        if (!Votes.ContainsKey(hash) || Votes[hash].VoteType != voteType)
+                        if (!votes.TryGetValue(hash, out var vote) || vote.VoteType != voteType)
                         {
-                            Votes[hash] = new UserVote
+                            votes[hash] = new UserVote
                             {
                                 Hash = hash,
                                 VoteType = voteType
                             };
                             SaveVotes();
                         }
-                        Plugin.Log.Info($"Voted {voteType} to {level.levelID}");
+                        Plugin.Log.Info($"Voted {voteType} to {levelId}");
                     }
-                }
-            });
+                }, CancellationToken.None, TaskContinuationOptions.None, TaskScheduler.Default);
+            }
         }
 
     }
