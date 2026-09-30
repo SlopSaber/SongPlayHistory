@@ -23,6 +23,13 @@ namespace SongPlayHistory.VoteTracker
         private static readonly object _voteWriteLock = new();
         private Task _pendingWork = Task.CompletedTask;
         internal Task Ready { get; private set; } = Task.CompletedTask;
+        internal Task Pending
+        {
+            get
+            {
+                lock (_voteWriteLock) return _pendingWork;
+            }
+        }
 
         [Inject]
         private readonly SiraLog _logger = null!;

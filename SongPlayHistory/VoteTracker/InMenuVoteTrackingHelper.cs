@@ -65,6 +65,15 @@ namespace SongPlayHistory.VoteTracker
         internal void Vote(BeatmapLevel level, VoteType voteType)
         {
             _voteTracker.Vote(level, voteType);
+            if (_voteTracker is InternalVoteTracker tracker)
+            {
+                tracker.Pending.ContinueWith(task =>
+                {
+                    if (task.IsFaulted) _logger.Error($"Failed to save vote: {task.Exception}");
+                    if (Instance == this) RefreshVotes();
+                }, CancellationToken.None, TaskContinuationOptions.NotOnCanceled, UnityMainThreadTaskScheduler.Default);
+            }
+
             _logger.Debug("Refreshing cells content");
             _tableView.RefreshCellsContent();
         }
