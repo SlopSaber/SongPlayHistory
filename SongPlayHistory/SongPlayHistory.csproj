@@ -1,5 +1,6 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
-<Project Sdk="Microsoft.NET.Sdk">
+<Project>
+  <Import Project="Sdk.props" Sdk="Microsoft.NET.Sdk" />
 
   <PropertyGroup>
     <TargetFramework>net472</TargetFramework>
@@ -138,4 +139,6 @@
     <PackageReference Include="BeatSaberModdingTools.Tasks" Version="2.0.0-beta7" PrivateAssets="all" IncludeAssets="build; contentfiles; analyzers; buildtransitive" />
     <PackageReference Include="BepInEx.AssemblyPublicizer.MSBuild" Version="0.4.1" PrivateAssets="all" />
   </ItemGroup>
+  <Import Project="Sdk.targets" Sdk="Microsoft.NET.Sdk" />
+  <Import Project="..\BSIPA.Layout.targets" Condition="Exists('$(GameDirectory)\IPA\Data\Managed\IPA.Loader.dll') OR Exists('$(BeatSaberDir)\IPA\Data\Managed\IPA.Loader.dll')" />
 </Project>
