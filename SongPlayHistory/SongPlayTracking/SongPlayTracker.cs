@@ -88,7 +88,11 @@ internal class SongPlayTracker : IInitializable, IDisposable
             return;
         }
 
+#if BEAT_SABER_1453
+        HandleLevelFinished(results, false, data.gameMode == GameMode.Party);
+#else
         HandleLevelFinished(results, false, data.gameMode?.Equals("Party", StringComparison.OrdinalIgnoreCase) == true);
+#endif
     }
 
     private void OnMultiplayerLevelDidFinish(MultiplayerLevelCompletionResults? results)

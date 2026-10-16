@@ -105,6 +105,15 @@ namespace SongPlayHistory.SongPlayData
 
         public void SaveRecord(LevelCompletionResults result, LevelCompletionResultsExtraData extraData)
         {
+#if BEAT_SABER_1453
+            var multipliedScore = result.score.multiplied;
+            var modifiedScore = result.score.modified;
+            var missedCount = result.missedCutsCount;
+#else
+            var multipliedScore = result.multipliedScore;
+            var modifiedScore = result.modifiedScore;
+            var missedCount = result.missedCount;
+#endif
             var beatmapKey = extraData.SceneSetupData.beatmapKey;
             if (!beatmapKey.IsValid())
             {
@@ -118,7 +127,7 @@ namespace SongPlayHistory.SongPlayData
                 return;
             }
             
-            if (result.multipliedScore <= 0)
+            if (multipliedScore <= 0)
             {
                 _logger.Warn("Record ignored, score is 0.");
                 return;
@@ -176,9 +185,9 @@ namespace SongPlayHistory.SongPlayData
                 record = new Record
                 {
                     Date = time,
-                    ModifiedScore = result.modifiedScore,
-                    RawScore = result.multipliedScore,
-                    LastNote = cleared ? -1 : result.goodCutsCount + result.badCutsCount + result.missedCount,
+                    ModifiedScore = modifiedScore,
+                    RawScore = multipliedScore,
+                    LastNote = cleared ? -1 : result.goodCutsCount + result.badCutsCount + missedCount,
                     Params = param,
                     MaxRawScore = cleared ? null : failRecord?.MaxRawScore
                 };
@@ -193,7 +202,7 @@ namespace SongPlayHistory.SongPlayData
             // Save to a file. We do this synchronously because the overhead is small. (400 ms / 15 MB, 60 ms / 1 MB)
             SaveRecordsToFile();
 
-            _logger.Info($"Saved a new record ({result.modifiedScore}).");
+            _logger.Info($"Saved a new record ({modifiedScore}).");
         }
 
         private void SaveRecordsToFile()
