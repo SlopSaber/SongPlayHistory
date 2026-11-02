@@ -129,7 +129,7 @@ namespace SongPlayHistory.SongPlayData
             
             if (multipliedScore <= 0)
             {
-                _logger.Warn("Record ignored, score is 0.");
+                _logger.Debug("Record ignored, score is 0.");
                 return;
             }
 
