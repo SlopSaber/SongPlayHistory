@@ -20,6 +20,8 @@ namespace SongPlayHistory.SongPlayData
 
         private ConcurrentDictionary<string, IList<Record>> Records { get; set; } = new();
 
+        private bool _dirty;
+
         [Inject]
         private readonly SiraLog _logger = null!;
 
@@ -37,6 +39,7 @@ namespace SongPlayHistory.SongPlayData
                     _logger.Notice("Restoring from a backup");
                     LoadRecords(backup.FullName, out records);
                     Records = records;
+                    _dirty = true;
                 }
                 else
                 {
@@ -50,7 +53,10 @@ namespace SongPlayHistory.SongPlayData
                 Records = records;
             }
             
-            SaveRecordsToFile();
+            if (_dirty)
+            {
+                SaveRecordsToFile();
+            }
             _logger.Info($"Loaded {SumRecords(Records)} records from {Records.Count} levels.");
             
             // TODO remove bad records?
@@ -85,7 +91,10 @@ namespace SongPlayHistory.SongPlayData
 
         public void Dispose()
         {
-            SaveRecordsToFile();
+            if (_dirty)
+            {
+                SaveRecordsToFile();
+            }
             BackupRecords();
         }
 
@@ -198,6 +207,7 @@ namespace SongPlayHistory.SongPlayData
             var key = new LevelMapKey(beatmapKey).ToOldKey();
 
             Records.GetOrAdd(key, new List<Record>()).Add(record);
+            _dirty = true;
 
             // Save to a file. We do this synchronously because the overhead is small. (400 ms / 15 MB, 60 ms / 1 MB)
             SaveRecordsToFile();
@@ -213,6 +223,7 @@ namespace SongPlayHistory.SongPlayData
                 {
                     var serialized = JsonConvert.SerializeObject(Records, Formatting.Indented);
                     File.WriteAllText(DataFile, serialized);
+                    _dirty = false;
                 }
             }
             catch (Exception ex) // IOException, JsonException
