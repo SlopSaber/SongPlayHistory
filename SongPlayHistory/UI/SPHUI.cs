@@ -262,7 +262,11 @@ namespace SongPlayHistory.UI
 
                 #region acc
                 var denominator = -1;
-                if (levelFinished || !config.AverageAccuracy)
+                if (levelFinished && r.MaxRawScore is > 0 && r.MaxRawScore >= r.RawScore)
+                {
+                    denominator = r.MaxRawScore.Value;
+                }
+                else if (levelFinished || !config.AverageAccuracy)
                 {
                     denominator = fullMaxScore;
                 }

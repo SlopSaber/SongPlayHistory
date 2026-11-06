@@ -198,7 +198,11 @@ namespace SongPlayHistory.SongPlayData
                     RawScore = multipliedScore,
                     LastNote = cleared ? -1 : result.goodCutsCount + result.badCutsCount + missedCount,
                     Params = param,
-                    MaxRawScore = cleared ? null : failRecord?.MaxRawScore
+                    MaxRawScore = cleared
+                        ? extraData.ScoringData.MaxRawScore > 0 && extraData.ScoringData.MaxRawScore >= multipliedScore
+                            ? extraData.ScoringData.MaxRawScore
+                            : null
+                        : failRecord?.MaxRawScore
                 };
             }
 

@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 using IPA.Utilities;
 using SiraUtil.Logging;
 using SongPlayHistory.Model;
+using SongPlayHistory.Utils;
 using Zenject;
 
 namespace SongPlayHistory.SongPlayData;
@@ -207,10 +208,11 @@ internal class ScoringCacheManager: IScoringCacheManager
             throw new Exception("Failed to get BeatmapData.");
         }
 
-        var notesCount = beatmapData.cuttableNotesCount;
-        var fullMaxScore = ScoreModel.ComputeMaxMultipliedScoreForBeatmap(beatmapData);
+        var scoringData = NoodleScoring.GetScoringData(beatmapKey, beatmapData);
+        var notesCount = scoringData.cuttableNotesCount;
+        var fullMaxScore = ScoreModel.ComputeMaxMultipliedScoreForBeatmap(scoringData);
         // we can use the original v2 scoring method to calculate the adjusted max score if there is no slider or burst
-        var isV2Score = !beatmapData.GetBeatmapDataItems<SliderData>(0).Any();
+        var isV2Score = !scoringData.GetBeatmapDataItems<SliderData>(0).Any();
         cancellationToken.ThrowIfCancellationRequested();
 
         var newCache = new LevelScoringCache
